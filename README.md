@@ -1,6 +1,6 @@
 ## Shiny PWM
 
-Highly configurable voltage feedback PWM controller for ATtiny85. Useful for DIY switch-mode DC/DC converters.
+Highly tunable voltage feedback PWM controller for ATtiny85. Useful for DIY switch-mode DC/DC converters.
 
 ## Features
 
