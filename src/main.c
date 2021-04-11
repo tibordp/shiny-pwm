@@ -4,12 +4,17 @@
 #include <avr/sleep.h>
 #include "config.h"
 
-uint8_t dutyCycle = 0;
 uint8_t cycle = 0;
+uint8_t pwmCycle = 0;
+int32_t dutyCycle = 0;
 int32_t adcMovingAverage = 0;
 uint16_t avgBuffer[WINDOW_SIZE] = {0};
 
 volatile int32_t targetVoltage = 512 * WINDOW_SIZE;
+
+#define _PWM_STEP_SIZE ((int32_t)(PWM_STEP_SIZE * PWM_DUTY_RESOLUTION))
+#define _PWM_DUTY_UPPER_LIMIT ((int32_t)(PWM_DUTY_UPPER_LIMIT * PWM_DUTY_RESOLUTION))
+#define _PWM_DUTY_LOWER_LIMIT ((int32_t)(PWM_DUTY_LOWER_LIMIT * PWM_DUTY_RESOLUTION))
 
 ISR(ADC_vect) {
 #ifdef MONITOR_ISR
@@ -18,24 +23,36 @@ ISR(ADC_vect) {
     // Calculate moving average of ADC readings
     uint8_t adcLow = ADCL;
     uint16_t adcReading = ADCH << 8 | adcLow;
-
+#if WINDOW_SIZE == 1
+    #define _ADC_VALUE adcReading
+#else
     adcMovingAverage += adcReading;
     adcMovingAverage -= avgBuffer[cycle];
     avgBuffer[cycle] = adcReading;
+    #define _ADC_VALUE adcMovingAverage
+#endif
 
     int32_t target = targetVoltage;
-    if (adcMovingAverage < target && dutyCycle <= PWM_DUTY_UPPER_LIMIT - PWM_STEP_SIZE)
+    if (_ADC_VALUE < target - (HYSTERESIS * WINDOW_SIZE) && dutyCycle <= _PWM_DUTY_UPPER_LIMIT - _PWM_STEP_SIZE)
     {
-        dutyCycle += PWM_STEP_SIZE;
-        OCR1A = dutyCycle;
+        dutyCycle += _PWM_STEP_SIZE;
     }
-    else if (adcMovingAverage > target && dutyCycle >= PWM_DUTY_LOWER_LIMIT + PWM_STEP_SIZE)
+    else if (_ADC_VALUE > target + (HYSTERESIS * WINDOW_SIZE) && dutyCycle >= _PWM_DUTY_LOWER_LIMIT + _PWM_STEP_SIZE)
     {
-        dutyCycle -= PWM_STEP_SIZE;
-        OCR1A = dutyCycle;
+        dutyCycle -= _PWM_STEP_SIZE;
     }
+#ifdef ENABLE_DITHERING
+    // Dither the PWM duty cycle to allow for higher resolution
+    OCR1A = (uint8_t)(dutyCycle / PWM_DUTY_RESOLUTION) 
+        + (dutyCycle % PWM_DUTY_RESOLUTION < pwmCycle ? 1 : 0);
+#else
+    OCR1A = (uint8_t)((dutyCycle + (PWM_DUTY_RESOLUTION/2)) / PWM_DUTY_RESOLUTION);
+#endif
 
+#if WINDOW_SIZE != 1
     cycle = (cycle + 1) % WINDOW_SIZE;
+#endif    
+    pwmCycle = (pwmCycle + 1) % PWM_DUTY_RESOLUTION;
 
 #ifdef MONITOR_ISR
     PORTB &= ~(1 << PB0);
